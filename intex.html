@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema di Prenotazione Palestra Collegio (REALTIME)</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback } = React;
+
+               const firebaseConfig = {
+          apiKey: "AIzaSyDzCtefryqocJNeNO5QRMARROW8kCDDJrU",
+          authDomain: "palestra-collegio-aed09.firebaseapp.com",
+          projectId: "palestra-collegio-aed09",
+          storageBucket: "palestra-collegio-aed09.firebasestorage.app",
+          messagingSenderId: "194890081701",
+          appId: "1:194890081701:web:7d1d878c159b6b918d744c"
+        };
+        
+        // Inizializzazione Firebase
+        const app = firebase.initializeApp(firebaseConfig);
+        const db = app.firestore();
+        // Collezioni per il database
+        const bookingsRef = db.collection("prenotazioni_palestra_datate"); 
+        const usersRef = db.collection("utenti_registrati"); 
+        
+        // --- NUOVA CONFIGURAZIONE ---
+        // 1. Orario Esteso: 07:00 - 00:00 (23:00 è l'ultima ora)
+        const ORE = [
+            "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", 
+            "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", 
+            "21:00", "22:00", "23:00"
+        ];
+        // 2. Colonna Unica: Unita in "Palestra"
+        const SEZIONI = ["Palestra (Area Unica)"]; 
+        
+        // 3. Gestione Admin: Inserisci i nomi esatti degli admin qui
+        // Esempio: "Mario Rossi", "Anna Bianchi"
+        const ADMIN_USERS = [
+            "giuseppe foresta", // <-- SOSTITUISCI QUESTO!
+            "ADMIN NOME COGNOME 2"  // <-- SOSTITUISCI QUESTO!
+            // Aggiungi altri nomi completi degli amministratori qui
+        ];
+        // --- FINE NUOVA CONFIGURAZIONE ---
+
+        // --- UTILITY DATE ---
+        const getTodayISO = () => new Date().toISOString().split('T')[0];
+        
+        const getStartOfWeek = (date) => {
+            const d = new Date(date);
+            const day = d.getDay() === 0 ? 6 : d.getDay() - 1; 
+            d.setDate(d.getDate() - day);
+            d.setHours(0, 0, 0, 0);
+            return d;
+        };
+        
+        const getEndOfWeek = (date) => {
+            const start = getStartOfWeek(date);
+            const end = new Date(start);
+            end.setDate(start.getDate() + 7);
+            end.setHours(23, 59, 59, 999);
+            return end;
+        };
+
+        /**
+         * Componente per il login (inserimento nome/cognome) e la registrazione
+         */
+        const LoginComponent = ({ onLogin }) => {
+            const [nome, setNome] = useState('');
+            const [cognome, setCognome] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                const fullName = `${nome.trim()} ${cognome.trim()}`;
+                if (fullName.trim() === '') {
+                    alert('Per favore, inserisci sia il nome che il cognome.');
+                    return;
+                }
+                
+                setLoading(true);
+                
+                // --- Passaggio di Registrazione ---
+                try {
+                    const userId = fullName.toLowerCase().replace(/\s/g, '-');
+                    
+                    const userDoc = await usersRef.doc(userId).get();
+                    
+                    if (!userDoc.exists) {
+                        await usersRef.doc(userId).set({
+                            nomeCompleto: fullName,
+                            dataRegistrazione: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                        alert(`Benvenuto ${fullName}! Registrazione completata.`);
+                    } else {
+                         console.log(`Accesso come ${fullName}.`);
+                    }
+                    
+                    onLogin(fullName);
+                } catch (error) {
+                    console.error("Errore durante la registrazione/accesso:", error);
+                    alert("Si è verificato un errore durante l'accesso. Controlla la console.");
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="max-w-md mx-auto mt-20 p-8 bg-white shadow-xl rounded-lg border-t-4 border-red-500">
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2 text-center">
+                        Sistema Prenotazione Palestra
+                    </h2>
+                    <p className="text-gray-600 mb-6 text-center text-sm">
+                        Inserisci i tuoi dati per registrarti e accedere.
+                    </p>
+                    <form onSubmit={handleLogin}>
+                        <div className="mb-4">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="nome">Nome</label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="nome" type="text" value={nome} onChange={(e) => setNome(e.target.value)} required />
+                        </div>
+                        <div className="mb-6">
+                            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="cognome">Cognome</label>
+                            <input
+                                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                                id="cognome" type="text" value={cognome} onChange={(e) => setCognome(e.target.value)} required />
+                        </div>
+                        <button 
+                            className={`text-white font-bold py-2 px-4 rounded w-full transition-colors ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-700 focus:outline-none focus:shadow-outline'}`}
+                            type="submit"
+                            disabled={loading}
+                        >
+                            {loading ? 'Accesso in corso...' : 'Registrati e Accedi'}
+                        </button>
+                    </form>
+                </div>
+            );
+        };
+
+
+        /**
+         * Componente singola cella di prenotazione
+         */
+        const CellaPrenotazione = ({ ora, sezione, prenotatoDa, userIdentifier, onToggle }) => {
+            let bgColor = 'bg-gray-100 hover:bg-gray-200';
+            let textColor = 'text-gray-800';
+            let statusText = 'Libera';
+            let canBook = true;
+
+            const isUserBooking = prenotatoDa === userIdentifier;
+
+            if (prenotatoDa) { 
+                bgColor = isUserBooking ? 'bg-red-500 hover:bg-red-600' : 'bg-yellow-500';
+                textColor = 'text-white';
+                statusText = isUserBooking ? 'Tua' : `${prenotatoDa.split(' ')[0]}`; 
+                canBook = isUserBooking; 
+            }
+            
+            if (prenotatoDa && !isUserBooking) {
+                canBook = false;
+            }
+
+            return (
+                <div
+                    className={`p-1 sm:p-2 border border-gray-300 text-center transition-colors duration-200 text-xs sm:text-sm font-medium ${canBook || !prenotatoDa ? 'cursor-pointer' : 'cursor-not-allowed'} ${bgColor} ${textColor}`}
+                    onClick={() => canBook ? onToggle(ora, sezione, prenotatoDa, userIdentifier) : null}
+                    title={prenotatoDa && !isUserBooking ? `Prenotato da: ${prenotatoDa}` : `Clicca per ${prenotatoDa ? 'liberare' : 'prenotare'}`}
+                >
+                    {statusText}
+                </div>
+            );
+        };
+
+        /**
+         * Componente principale dell'App
+         */
+        const App = () => {
+            const [user, setUser] = useState(null); 
+            const [prenotazioni, setPrenotazioni] = useState({});
+            const [loading, setLoading] = useState(true);
+            const [selectedDate, setSelectedDate] = useState(getTodayISO()); 
+
+            // Verifica se l'utente è un amministratore
+            const isAdmin = user ? ADMIN_USERS.includes(user) : false;
+
+            // Carica l'utente da localStorage
+            useEffect(() => {
+                const savedUser = localStorage.getItem('collegioUser');
+                if (savedUser) {
+                    setUser(savedUser);
+                }
+            }, []);
+
+            // 1. ASCOLTA IL DATABASE (solo per la data selezionata)
+            useEffect(() => {
+                setLoading(true);
+                const startKey = `${selectedDate}-`;
+                const endKey = `${selectedDate}0`; 
+
+                const unsubscribe = bookingsRef
+                    .where(firebase.firestore.FieldPath.documentId(), '>=', startKey)
+                    .where(firebase.firestore.FieldPath.documentId(), '<', endKey)
+                    .onSnapshot(snapshot => {
+                        const data = {};
+                        snapshot.forEach(doc => {
+                            data[doc.id] = doc.data().prenotatoDa; 
+                        });
+                        setPrenotazioni(data);
+                        setLoading(false);
+                    }, error => {
+                        console.error("Errore nel recupero dei dati da Firestore:", error);
+                        setLoading(false);
+                    });
+
+                return () => unsubscribe(); 
+            }, [selectedDate]); 
+
+            // 2. FUNZIONE DI LOGIN
+            const handleUserLogin = (fullName) => {
+                setUser(fullName);
+                localStorage.setItem('collegioUser', fullName);
+            };
+
+            // 3. FUNZIONE DI TOGGLE: Aggiorna il database con i controlli
+            const handleTogglePrenotazione = useCallback(async (ora, sezione, prenotatoDa, userIdentifier) => {
+                const fullKey = `${selectedDate}-${sezione}-${ora}`;
+                const selectedDateObj = new Date(selectedDate);
+                const today = new Date(getTodayISO());
+                
+                if (selectedDateObj < today) {
+                    alert("Non è possibile prenotare per giorni passati.");
+                    return;
+                }
+                
+                // --- Eliminazione della Prenotazione ---
+                if (prenotatoDa === userIdentifier) {
+                    await bookingsRef.doc(fullKey).delete();
+                    return;
+                }
+                
+                // --- Slot già prenotato da altri ---
+                if (prenotatoDa) {
+                    alert(`Slot già prenotato da ${prenotatoDa}. Solo chi ha prenotato può liberare.`);
+                    return;
+                }
+
+                // --- Controlli Limiti (Max 1/giorno, Max 3/settimana) ---
+                setLoading(true);
+                const userBookingsSnapshot = await bookingsRef.where('prenotatoDa', '==', userIdentifier).get();
+                const userBookings = userBookingsSnapshot.docs.map(doc => doc.id);
+
+                // 3.1. Limite Giornaliero: Max 1 ora al giorno
+                const dailyBookingsCount = userBookings.filter(key => 
+                    key.startsWith(selectedDate)
+                ).length;
+                
+                if (dailyBookingsCount >= 1) {
+                    alert(`Limite Giornaliero superato! Hai già una prenotazione (${dailyBookingsCount}/1) per il ${selectedDate}.`);
+                    setLoading(false);
+                    return;
+                }
+
+                // 3.2. Limite Settimanale: Max 3 prenotazioni a settimana
+                const startOfWeekTimestamp = getStartOfWeek(selectedDateObj).getTime();
+                const endOfWeekTimestamp = getEndOfWeek(selectedDateObj).getTime();
+                
+                let weeklyCount = 0;
+                userBookings.forEach(key => {
+                    const bookingDateStr = key.split('-').slice(0, 3).join('-'); 
+                    const bookingTimestamp = new Date(bookingDateStr).getTime();
+                    
+                    if (bookingTimestamp >= startOfWeekTimestamp && bookingTimestamp <= endOfWeekTimestamp) {
+                         weeklyCount++;
+                    }
+                });
+
+                if (weeklyCount >= 3) {
+                    alert(`Limite Settimanale superato! Hai già ${weeklyCount}/3 prenotazioni in questa settimana.`);
+                    setLoading(false);
+                    return;
+                }
+
+                // --- 4. Prenotazione (se tutti i controlli passano) ---
+                try {
+                    await bookingsRef.doc(fullKey).set({
+                        prenotatoDa: userIdentifier, 
+                        dataPrenotazione: selectedDate, 
+                        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                } catch (e) {
+                    console.error("Errore nell'aggiornamento della prenotazione:", e);
+                    alert("Si è verificato un errore durante la prenotazione. Riprova.");
+                }
+
+                setLoading(false);
+            }, [selectedDate]); 
+
+            // 4. Funzioni di Supporto (Logout e Reset)
+            const handleLogout = () => {
+                if (window.confirm("Vuoi cambiare utente?")) {
+                    localStorage.removeItem('collegioUser');
+                    setUser(null);
+                }
+            };
+            
+            // Funzione di Reset (visibile solo agli admin)
+            const handleReset = async () => {
+                if (!window.confirm("Sei sicuro di voler resettare TUTTE le prenotazioni, per TUTTI i giorni, per TUTTI gli utenti? Questa azione è irreversibile!")) {
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const snapshot = await bookingsRef.get();
+                    const batch = db.batch();
+                    snapshot.docs.forEach(doc => {
+                        batch.delete(doc.ref);
+                    });
+                    await batch.commit();
+                    alert("Griglia resettata con successo per tutti gli utenti e tutti i giorni!");
+                } catch (e) {
+                    console.error("Errore nel reset della griglia:", e);
+                    alert("Errore nel reset. Controlla la console.");
+                }
+                setLoading(false);
+            };
+
+            // Se l'utente non è loggato, mostra il LoginComponent
+            if (!user) {
+                return <LoginComponent onLogin={handleUserLogin} />;
+            }
+            
+            // Altrimenti, mostra l'app principale
+            return (
+                <div className="p-4 sm:p-8 bg-gray-50 min-h-screen">
+                    <header className="mb-6 border-b pb-4">
+                        <h1 className="text-3xl sm:text-4xl font-bold text-gray-800 pb-2 inline-block">
+                            Prenotazioni Palestra Collegio 🏋️
+                        </h1>
+                        <p className="text-gray-600 mt-2 flex justify-between items-center">
+                            <span>
+                                Utente: <strong className="text-red-600">{user}</strong>. <br/>
+                                Max 1 ora al giorno, Max 3 ore a settimana.
+                            </span>
+                             <button
+                                onClick={handleLogout}
+                                className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded text-sm transition-colors duration-200"
+                            >
+                                Cambia Utente
+                            </button>
+                        </p>
+                    </header>
+                    
+                    <div className="mb-6 flex flex-col sm:flex-row sm:items-center">
+                        <label htmlFor="data-selector" className="font-bold text-gray-700 mr-4 mb-2 sm:mb-0">
+                            Seleziona il Giorno:
+                        </label>
+                        <input
+                            id="data-selector"
+                            type="date"
+                            value={selectedDate}
+                            onChange={(e) => setSelectedDate(e.target.value)}
+                            min={getTodayISO()} 
+                            className="p-2 border border-gray-300 rounded focus:ring-red-500 focus:border-red-500"
+                        />
+                    </div>
+
+
+                    {loading ? (
+                        <div className="text-center p-10 text-xl text-gray-500">
+                            Caricamento dati in corso...
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto shadow-xl rounded-lg bg-white">
+                            <div
+                                className="grid auto-cols-min"
+                                style={{
+                                    gridTemplateColumns: `minmax(70px, 1fr) repeat(${SEZIONI.length}, minmax(200px, 1fr))`
+                                }}
+                            >
+                                {/* Intestazione delle Colonne (Sezioni Palestra) */}
+                                <div className="p-2 border border-gray-300 font-bold bg-gray-200 sticky left-0 z-10 text-sm sm:text-base">Ora</div>
+                                {SEZIONI.map(sezione => (
+                                    <div key={sezione} className="p-2 border border-gray-300 font-bold bg-gray-200 text-center text-sm sm:text-base">
+                                        {sezione}
+                                    </div>
+                                ))}
+
+                                {/* Righe (Ore) e Celle */}
+                                {ORE.map(ora => (
+                                    <React.Fragment key={ora}>
+                                        {/* Intestazione della Riga (Ora) */}
+                                        <div className="p-2 border border-gray-300 font-bold bg-gray-100 text-sm sm:text-base sticky left-0 z-10">
+                                            {ora} - {ORE[ORE.indexOf(ora) + 1] || '00:00'}
+                                        </div>
+                                        {/* Celle di Prenotazione */}
+                                        {SEZIONI.map(sezione => {
+                                            // La chiave è basata sulla sezione (unica) e sull'ora
+                                            const key = `${selectedDate}-${sezione}-${ora}`;
+                                            return (
+                                                <CellaPrenotazione
+                                                    key={key}
+                                                    ora={ora}
+                                                    sezione={sezione}
+                                                    prenotatoDa={prenotazioni[key]}
+                                                    userIdentifier={user}
+                                                    onToggle={handleTogglePrenotazione}
+                                                />
+                                            );
+                                        })}
+                                    </React.Fragment>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MOSTRA SOLO SE L'UTENTE È ADMIN */}
+                    {isAdmin && (
+                        <footer className="mt-8 pt-4 border-t border-gray-200 flex justify-end">
+                            <button
+                                onClick={handleReset}
+                                disabled={loading}
+                                className={`font-bold py-2 px-4 rounded transition-colors duration-200 text-xs ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-700 hover:bg-red-800 text-white'}`}
+                            >
+                                (ADMIN) Resetta TUTTA la Griglia
+                            </button>
+                        </footer>
+                    )}
+                </div>
+            );
+        };
+
+        // Renderizza l'app nel div con id="root"
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
+
+</body>
+</html>
